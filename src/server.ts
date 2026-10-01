@@ -495,7 +495,7 @@ export function buildServer(env: Env, wsRaw: string): McpServer {
       const parts: string[] = [];
       if (checkin?.completed_at)
         parts.push(
-          `${name} checked in at ${db.spokenTime(db.localNow(p.tz, new Date(checkin.completed_at)).time)}${checkin.mood ? `, feeling ${checkin.mood} out of 5` : ""}${checkin.pain && checkin.pain !== "none" ? `, and mentioned ${checkin.pain}` : ""}.`,
+          `${name} checked in at ${db.spokenTime(db.localNow(p.tz, new Date(checkin.completed_at)).time)}${checkin.mood ? `, feeling ${checkin.mood} out of 5` : ""}${checkin.pain && checkin.pain !== "none" ? `, and said "${checkin.pain}"` : ""}.`,
         );
       else if (checkin) parts.push(`${name} started the check-in but didn't finish it.`);
       else parts.push(`${name} hasn't checked in yet today. The check-in is expected by ${db.spokenTime(p.checkin_by)}.`);
