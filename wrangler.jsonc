@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "daybreak",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-24",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": "public", "binding": "ASSETS", "run_worker_first": ["/mcp", "/mcp/*", "/api/*"] },
+  "ai": { "binding": "AI" },
+  "d1_databases": [{ "binding": "DB", "database_name": "daybreak", "database_id": "007135ad-3394-4e4e-a916-56f1b3796074" }],
+  "triggers": { "crons": ["*/15 * * * *"] },
+  "observability": { "enabled": true }
+}

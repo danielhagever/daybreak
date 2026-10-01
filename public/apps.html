@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Daybreak MCP App preview</title>
+<style>
+  body { margin: 0; background: #140f0b; color: #eef3f8; font: 14px/1.5 system-ui, sans-serif; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 20px 16px; }
+  iframe { width: 100%; height: 520px; border: 1px solid #3a2c20; border-radius: 12px; background: #0f1720; }
+  pre { color: #8ea2b6; font-size: 12px; white-space: pre-wrap; }
+  a { color: #ffb347; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 style="font-size:20px;margin:0 0 4px">Daybreak today, as an MCP App</h1>
+  <p style="color:#8ea2b6;margin:0 0 14px">This page is a tiny MCP Apps host. It calls <code>today_plan</code> on the Daybreak MCP server, reads the tool's <code>ui://daybreak/today.html</code> resource and renders it the way Claude, ChatGPT or VS Code would. <a href="/">Back to the Echo Show</a></p>
+  <iframe id="view" sandbox="allow-scripts" title="Daybreak today"></iframe>
+  <pre id="log"></pre>
+</div>
+<script type="module" src="/apps-host.js"></script>
+</body>
+</html>

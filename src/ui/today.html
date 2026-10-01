@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Daybreak today</title>
+<style>
+  :root { --bg:#1a1410; --card:#2a2019; --ink:#fff7ee; --mute:#d9c3ab; --sun:#ffb347; --ok:#7dd3a0; --warn:#ff8a65; }
+  * { box-sizing: border-box; }
+  body { margin:0; background: var(--bg); color: var(--ink); font: 20px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 18px; }
+  h2 { font-size: 15px; letter-spacing: .08em; text-transform: uppercase; color: var(--sun); margin: 18px 0 8px; }
+  .say { font-size: 22px; background: #3a2a1d; border-radius: 16px; padding: 14px 16px; }
+  .row { display:flex; align-items:center; gap: 12px; background: var(--card); border-radius: 14px; padding: 12px 14px; margin-bottom: 8px; }
+  .row .t { min-width: 90px; color: var(--mute); font-size: 18px; }
+  .row .n { flex: 1; font-weight: 600; }
+  .pill { font-size: 15px; border-radius: 999px; padding: 4px 12px; background: #3a2a1d; color: var(--mute); }
+  .taken { background: #1f3a2c; color: var(--ok); }
+  .missed, .due { background: #4a2418; color: var(--warn); }
+  button { font: 600 18px system-ui, sans-serif; background: var(--sun); color: #2a1a0a; border: 0; border-radius: 12px; padding: 10px 16px; cursor: pointer; }
+  .empty { color: var(--mute); }
+</style>
+</head>
+<body>
+<div id="say" class="say" hidden></div>
+<h2>Medicines today</h2>
+<div id="meds"><span class="empty">Waiting for data…</span></div>
+<h2>Coming up</h2>
+<div id="appts"><span class="empty">Waiting for data…</span></div>
+<script type="module">
+/*__APP_BUNDLE__*/
+</script>
+<script type="module">
+const { App } = window.McpApps;
+const app = new App({ name: "Daybreak today", version: "0.1.0" }, {});
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const t12 = (hhmm) => { const [h, m] = hhmm.split(":").map(Number); return `${h % 12 || 12}${m ? ":" + String(m).padStart(2, "0") : ""} ${h >= 12 ? "pm" : "am"}`; };
+function render(d) {
+  if (!d) return;
+  if (d.spoken) { $("say").hidden = false; $("say").textContent = d.spoken; }
+  const s = d.schedule || [];
+  $("meds").innerHTML = s.length ? s.map((x) => `<div class="row"><span class="t">${t12(x.slot)}</span><span class="n">${esc(x.nickname || x.name)}</span>
+    ${x.status === "taken" ? `<span class="pill taken">Taken</span>` : x.status === "skipped" ? `<span class="pill">Skipped</span>` : x.status === "missed" ? `<span class="pill missed">Missed</span>`
+      : `<button data-med="${esc(x.name)}" data-slot="${x.slot}">I took it</button>`}</div>`).join("") : `<span class="empty">No medicines on the list.</span>`;
+  const a = d.appointments || [];
+  $("appts").innerHTML = a.length ? a.map((x) => `<div class="row"><span class="t">${esc(new Date(x.starts_at + ":00").toLocaleDateString([], { weekday: "short" }))} ${t12(x.starts_at.slice(11, 16))}</span><span class="n">${esc(x.title)}</span>${x.place ? `<span class="pill">${esc(x.place)}</span>` : ""}</div>`).join("") : `<span class="empty">Nothing scheduled this week.</span>`;
+}
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-med]");
+  if (!b) return;
+  b.disabled = true; b.textContent = "Saving…";
+  const res = await app.callServerTool({ name: "log_dose", arguments: { medication: b.dataset.med, status: "taken", slot: b.dataset.slot } });
+  render({ ...res.structuredContent, appointments: window.__appts });
+});
+app.ontoolresult = (p) => { window.__appts = p.structuredContent?.appointments; render(p.structuredContent); };
+await app.connect();
+</script>
+</body>
+</html>

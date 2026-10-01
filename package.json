@@ -1,0 +1,27 @@
+{
+  "name": "daybreak",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:ui": "node scripts/build-ui.mjs && esbuild hostsrc/apps-host.ts --bundle --format=esm --minify --outfile=public/apps-host.js",
+    "dev": "wrangler dev",
+    "deploy": "npm run build:ui && wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test:convo": "python3 test/convo.py"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260702.1",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "wrangler": "4.103.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "^2.2.0",
+    "@modelcontextprotocol/ext-apps": "^2.0.3",
+    "@modelcontextprotocol/server": "^2.2.0",
+    "zod": "^4.6.5"
+  },
+  "description": "Daybreak: a daily check-in for parents who live alone, with the family in the loop. An MCP server for Alexa+.",
+  "license": "MIT"
+}

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Daybreak family view</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#140f0b; --panel:#221a14; --ink:#fff7ee; --mute:#cbb39b; --line:#3a2c20; --sun:#ffb347; --ok:#7dd3a0; --warn:#ff8a65; --bad:#ff5a5a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 Inter, system-ui, sans-serif; }
+  .wrap { max-width:1100px; margin:0 auto; padding:22px 16px 40px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:var(--mute); margin:0 0 18px; }
+  .grid { display:grid; grid-template-columns: minmax(0,1.3fr) minmax(0,1fr); gap:16px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px 16px; margin-bottom:16px; }
+  h3 { margin:0 0 10px; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--sun); }
+  .big { font-size:26px; font-weight:700; margin:2px 0; }
+  .m { color:var(--mute); font-size:13px; }
+  .row { display:flex; justify-content:space-between; gap:10px; padding:7px 0; border-bottom:1px solid var(--line); }
+  .row:last-child { border-bottom:0; }
+  .pill { font-size:12px; border-radius:999px; padding:2px 10px; background:#3a2a1d; color:var(--mute); white-space:nowrap; }
+  .taken { color:var(--ok); background:#1f3a2c; } .missed, .due { color:var(--warn); background:#4a2418; }
+  .alert { border-left:3px solid var(--sun); padding:6px 10px; margin-bottom:8px; background:#2a2019; border-radius:6px; }
+  .alert.warn { border-left-color: var(--warn); } .alert.urgent { border-left-color: var(--bad); background:#3a1616; }
+  .week { display:flex; gap:6px; align-items:flex-end; height:90px; margin-top:6px; }
+  .bar { flex:1; background:#3a2a1d; border-radius:6px 6px 0 0; position:relative; min-height:4px; }
+  .bar.on { background: linear-gradient(180deg, var(--sun), #c97a1c); }
+  .bar span { position:absolute; bottom:-18px; left:0; right:0; text-align:center; font-size:11px; color:var(--mute); }
+  a { color:var(--sun); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 id="title">Family view</h1>
+  <p class="sub">What the family sees without calling every morning. Updates every few seconds. <a id="back" href="/">Back to the Echo Show</a></p>
+  <div class="grid">
+    <div>
+      <section><h3>This morning</h3><div id="checkin" class="m">Loading…</div></section>
+      <section><h3>Medicines today</h3><div id="meds" class="m">Loading…</div></section>
+      <section><h3>Mood, last 7 days</h3><div id="week" class="week"></div><div style="height:18px"></div></section>
+    </div>
+    <div>
+      <section><h3>Alerts</h3><div id="alerts" class="m">Loading…</div></section>
+      <section><h3>Coming up</h3><div id="appts" class="m">Loading…</div></section>
+    </div>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+let ws = new URLSearchParams(location.search).get("ws");
+try { ws = ws || localStorage.getItem("daybreak-ws"); } catch {}
+ws = ws || "demo";
+$("back").href = `/?ws=${ws}`;
+const t12 = (hhmm) => { const [h, m] = hhmm.split(":").map(Number); return `${h % 12 || 12}${m ? ":" + String(m).padStart(2, "0") : ""} ${h >= 12 ? "pm" : "am"}`; };
+async function load() {
+  const s = await (await fetch(`/api/state?ws=${encodeURIComponent(ws)}`)).json();
+  if (s.error) return;
+  const name = s.profile.parent_name;
+  $("title").textContent = `How ${name} is doing`;
+  const c = s.checkin;
+  $("checkin").innerHTML = c?.completed_at
+    ? `<div class="big">Checked in at ${new Date(c.completed_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", timeZone: s.profile.tz })}</div>
+       <div>Mood <b>${c.mood ?? "?"}/5</b> · Sleep: ${esc(c.sleep ?? "?")} · Pain: ${esc(c.pain ?? "?")}</div>`
+    : c ? `<div class="big">Check-in started</div><div class="m">Waiting for the answer about ${esc(c.pending)}</div>`
+    : `<div class="big">No check-in yet</div><div class="m">Expected by ${t12(s.profile.checkin_by)} (${esc(s.profile.tz)}). It's ${t12(s.time)} there now.</div>`;
+  $("meds").innerHTML = s.schedule.length ? s.schedule.map((x) => `<div class="row"><span>${t12(x.slot)} · ${esc(x.nickname || x.name)}</span><span class="pill ${esc(x.status)}">${esc(x.status)}</span></div>`).join("") : "No medicines on the list.";
+  const days = [...Array(7)].map((_, i) => { const d = new Date(s.day + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() - 6 + i); return d.toISOString().slice(0, 10); });
+  $("week").innerHTML = days.map((d) => { const r = s.week.find((w) => w.day === d && w.completed_at); const h = r?.mood ? r.mood * 18 : 4; return `<div class="bar ${r ? "on" : ""}" style="height:${h}px" title="${d}: ${r ? "mood " + r.mood : "no check-in"}"><span>${new Date(d + "T12:00:00Z").toLocaleDateString([], { weekday: "narrow", timeZone: "UTC" })}</span></div>`; }).join("");
+  $("alerts").innerHTML = s.alerts.length ? s.alerts.map((a) => `<div class="alert ${esc(a.level)}">${esc(a.text)}<div class="m">${new Date(a.at).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}${a.ack ? " · seen by " + esc(a.ack_by) : ""}</div></div>`).join("") : "Nothing to worry about.";
+  $("appts").innerHTML = s.appts.length ? s.appts.map((a) => `<div class="row"><span>${esc(a.title)}</span><span class="pill">${new Date(a.starts_at + ":00").toLocaleDateString([], { weekday: "short" })} ${t12(a.starts_at.slice(11, 16))}</span></div>`).join("") : "Nothing scheduled.";
+}
+load(); setInterval(load, 5000);
+</script>
+</body>
+</html>
