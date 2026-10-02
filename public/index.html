@@ -155,9 +155,19 @@ function renderCards(cards) {
 
 function setRing(mode) { $("ring").className = "ring " + (mode || ""); }
 
-function speak(text) {
+let currentAudio = null;
+async function speak(text) {
+  try { speechSynthesis.cancel(); } catch {}
+  try { if (currentAudio) currentAudio.pause(); } catch {}
+  // Natural voice from the server (Deepgram Aura-2 on Workers AI, cached); the browser's own voice is the fallback.
   try {
-    speechSynthesis.cancel();
+    const r = await fetch("/api/tts", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+    if (!r.ok) throw new Error("tts " + r.status);
+    currentAudio = new Audio(URL.createObjectURL(await r.blob()));
+    await currentAudio.play();
+    return;
+  } catch {}
+  try {
     const u = new SpeechSynthesisUtterance(text);
     const v = speechSynthesis.getVoices().find((v) => /en-US/.test(v.lang) && /Samantha|Google US English|Aria|Jenny|Ava/.test(v.name));
     if (v) u.voice = v;
@@ -208,7 +218,7 @@ else {
   const rec = new SR(); rec.lang = "en-US"; rec.interimResults = false;
   rec.onresult = (e) => ask(e.results[0][0].transcript);
   rec.onend = () => { $("mic").classList.remove("on"); if (!busy) setRing(""); };
-  $("mic").onclick = () => { speechSynthesis.cancel(); $("mic").classList.add("on"); setRing("listen"); rec.start(); };
+  $("mic").onclick = () => { speechSynthesis.cancel(); try { if (currentAudio) currentAudio.pause(); } catch {} $("mic").classList.add("on"); setRing("listen"); rec.start(); };
 }
 refreshSide();
 </script>

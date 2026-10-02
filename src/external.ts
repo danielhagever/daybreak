@@ -116,10 +116,19 @@ export interface Place {
 }
 
 export async function geocode(city: string): Promise<Place | null> {
-  const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en`;
+  // "Portland, Maine" must not become Portland, Oregon: prefer a candidate whose state or country
+  // matches the text after the comma, otherwise the most populous match.
+  const [name, ...rest] = city.split(",").map((x) => x.trim());
+  const qualifier = rest.join(" ").toLowerCase();
+  const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=10&language=en`;
   const d: any = await (await fetch(url, { headers: UA })).json();
-  const r = d.results?.[0];
-  return r ? { name: r.name, lat: r.latitude, lon: r.longitude, tz: r.timezone, country: r.country_code } : null;
+  const list: any[] = d.results ?? [];
+  if (!list.length) return null;
+  const matches = qualifier
+    ? list.filter((r) => [r.admin1, r.country, r.country_code].some((v) => v && (qualifier.includes(String(v).toLowerCase()) || String(v).toLowerCase().includes(qualifier))))
+    : [];
+  const r = [...(matches.length ? matches : list)].sort((a, b) => (b.population ?? 0) - (a.population ?? 0))[0];
+  return { name: r.name, lat: r.latitude, lon: r.longitude, tz: r.timezone, country: r.country_code };
 }
 
 export interface WeatherAdvice {
@@ -129,41 +138,30 @@ export interface WeatherAdvice {
   spoken: string;
 }
 
-export async function weatherAdvice(lat: number, lon: number): Promise<WeatherAdvice> {
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=apparent_temperature_max,apparent_temperature_min,precipitation_sum&temperature_unit=fahrenheit&timezone=auto&forecast_days=1`;
-  const d: any = await (await fetch(url, { headers: UA, cf: { cacheTtl: 900, cacheEverything: true } } as RequestInit)).json();
-  const maxF = Math.round(d.daily.apparent_temperature_max[0]);
-  const minF = Math.round(d.daily.apparent_temperature_min[0]);
-  const precip = Number(d.daily.precipitation_sum[0] ?? 0);
-  if (maxF >= 103)
-    return {
-      level: "danger",
-      maxFeelsF: maxF,
-      minFeelsF: minF,
-      spoken: `It will feel like ${maxF} degrees today. That's in the weather service's danger range, so please stay inside in the cool during the afternoon and keep a glass of water next to you.`,
-    };
-  if (maxF >= 90)
-    return {
-      level: "extreme_caution",
-      maxFeelsF: maxF,
-      minFeelsF: minF,
-      spoken: `It will feel like ${maxF} degrees today, hot enough for heat exhaustion. Drink water through the day and do errands in the morning.`,
-    };
-  if (minF <= 32 && precip > 0)
-    return {
-      level: "ice",
-      maxFeelsF: maxF,
-      minFeelsF: minF,
-      spoken: `It will be below freezing with some precipitation, so steps and sidewalks may be icy. Take it slow outside, or wait for it to warm up.`,
-    };
-  if (maxF >= 80)
-    return {
-      level: "caution",
-      maxFeelsF: maxF,
-      minFeelsF: minF,
-      spoken: `A warm day, feeling like ${maxF} at most. Keep some water handy.`,
-    };
+export function adviceFrom(maxF: number, minF: number, precip: number): WeatherAdvice {
+  if (maxF >= 103) return { level: "danger", maxFeelsF: maxF, minFeelsF: minF, spoken: `It will feel like ${maxF} degrees today. That's in the weather service's danger range, so please stay inside in the cool during the afternoon and keep a glass of water next to you.` };
+  if (maxF >= 90) return { level: "extreme_caution", maxFeelsF: maxF, minFeelsF: minF, spoken: `It will feel like ${maxF} degrees today, hot enough for heat exhaustion. Drink water through the day and do errands in the morning.` };
+  if (minF <= 32 && precip > 0) return { level: "ice", maxFeelsF: maxF, minFeelsF: minF, spoken: `It will be below freezing with some precipitation, so steps and sidewalks may be icy. Take it slow outside, or wait for it to warm up.` };
+  if (maxF >= 80) return { level: "caution", maxFeelsF: maxF, minFeelsF: minF, spoken: `A warm day, feeling like ${maxF} at most. Keep some water handy.` };
   return { level: "none", maxFeelsF: maxF, minFeelsF: minF, spoken: `It will feel like ${maxF} degrees at most today.` };
+}
+
+const FORECAST = "daily=apparent_temperature_max,apparent_temperature_min,precipitation_sum&temperature_unit=fahrenheit&timezone=auto&forecast_days=1";
+
+export async function weatherAdvice(lat: number, lon: number): Promise<WeatherAdvice> {
+  const d: any = await (await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&${FORECAST}`, { headers: UA, cf: { cacheTtl: 900, cacheEverything: true } } as RequestInit)).json();
+  return adviceFrom(Math.round(d.daily.apparent_temperature_max[0]), Math.round(d.daily.apparent_temperature_min[0]), Number(d.daily.precipitation_sum[0] ?? 0));
+}
+
+// One request for many households (Open-Meteo accepts comma-separated coordinates), so the
+// background check stays far below the free plan's 50 outbound calls per run.
+export async function weatherAdviceMany(points: { lat: number; lon: number }[]): Promise<WeatherAdvice[]> {
+  if (!points.length) return [];
+  const lat = points.map((p) => p.lat).join(",");
+  const lon = points.map((p) => p.lon).join(",");
+  const d: any = await (await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&${FORECAST}`, { headers: UA })).json();
+  const list: any[] = Array.isArray(d) ? d : [d];
+  return list.map((x) => adviceFrom(Math.round(x.daily.apparent_temperature_max[0]), Math.round(x.daily.apparent_temperature_min[0]), Number(x.daily.precipitation_sum[0] ?? 0)));
 }
 
 // Plain words for the conditions that appear most often in label indications. Only terms are

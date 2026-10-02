@@ -1,9 +1,10 @@
 import { createMcpHandler } from "@modelcontextprotocol/server";
+import { speech } from "./tts";
 import * as db from "./db";
 import type { Env } from "./db";
 import { buildServer } from "./server";
 import { runTurn } from "./agent";
-import { lookupLabel, weatherAdvice } from "./external";
+import { lookupLabel, weatherAdviceMany } from "./external";
 
 const wsOf = (req: Request) => db.cleanWs(new URL(req.url).searchParams.get("ws") ?? req.headers.get("x-daybreak-household"));
 const json = (data: unknown, status = 200) =>
@@ -54,6 +55,11 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) return mcp(env, req);
+
+    if (url.pathname === "/api/tts" && req.method === "POST") {
+      const body = (await req.json().catch(() => null)) as { text?: string } | null;
+      return speech(env, body?.text ?? "", req.headers.get("x-test-voice"));
+    }
 
     if (url.pathname === "/api/chat" && req.method === "POST") {
       const body = (await req.json().catch(() => null)) as {
@@ -132,71 +138,67 @@ export default {
   // Every 15 minutes, per household, in the parent's own time zone: flag a missing morning
   // check-in, mark doses not taken within two hours as missed, remind about tomorrow's
   // appointments in the evening, and record heat or ice advisories in the morning.
+  // The free plan allows 50 outbound calls per run, so everything is read in one D1 batch,
+  // written in one batch, and the weather for all households comes from one request.
   async scheduled(_e: ScheduledController, env: Env) {
-    const { results: homes } = await env.DB.prepare("SELECT * FROM profile").all<any>();
-    for (const row of homes) {
-      const p = { ...row, family: JSON.parse(row.family || "[]") } as db.Profile;
+    const since = new Date(Date.now() - 2 * 86400_000).toISOString().slice(0, 10);
+    const [homesR, medsR, dosesR, checkinsR, alertsR, apptsR] = await env.DB.batch([
+      env.DB.prepare("SELECT * FROM profile"),
+      env.DB.prepare("SELECT * FROM meds WHERE active = 1"),
+      env.DB.prepare("SELECT ws, med_id, day, slot FROM doses WHERE day >= ?").bind(since),
+      env.DB.prepare("SELECT ws, day, completed_at FROM checkins WHERE day >= ?").bind(since),
+      env.DB.prepare("SELECT ws, day, kind FROM alerts WHERE day >= ?").bind(since),
+      env.DB.prepare("SELECT * FROM appointments WHERE reminded = 0 AND starts_at >= ?").bind(since),
+    ]);
+    const homes = (homesR.results as any[]).map((r) => ({ ...r, family: JSON.parse(r.family || "[]") }) as db.Profile);
+    const meds = (medsR.results as any[]).map((m) => ({ ...m, times: JSON.parse(m.times || "[]") }));
+    const doses = dosesR.results as any[];
+    const checkins = checkinsR.results as any[];
+    const alerts = alertsR.results as any[];
+    const appts = apptsR.results as any[];
+    const writes: D1PreparedStatement[] = [];
+    const now = db.nowIso();
+    const alert = (ws: string, day: string, level: string, kind: string, text: string) =>
+      writes.push(env.DB.prepare("INSERT INTO alerts (ws, at, day, level, kind, text) VALUES (?, ?, ?, ?, ?, ?)").bind(ws, now, day, level, kind, text.slice(0, 400)));
+    const needWeather: { p: db.Profile; day: string }[] = [];
+
+    for (const p of homes) {
       const { day, time } = db.localNow(p.tz);
-      const { results: todays } = await env.DB.prepare("SELECT kind, text FROM alerts WHERE ws = ? AND day = ?").bind(p.ws, day).all<any>();
-      const already = (kind: string, text?: string) => todays.some((a) => a.kind === kind && (!text || a.text === text));
-
-      const checkin = await env.DB.prepare("SELECT completed_at FROM checkins WHERE ws = ? AND day = ?").bind(p.ws, day).first<any>();
-      if (time > p.checkin_by && !checkin?.completed_at && !already("no_checkin")) {
-        await db.addAlert(
-          env,
-          p.ws,
-          day,
-          "warn",
-          "no_checkin",
-          `No good-morning check-in from ${p.parent_name} yet (expected by ${db.spokenTime(p.checkin_by)}).`,
-        );
-      }
-
-      const meds = await db.listMeds(env, p.ws);
-      const doses = await db.dosesFor(env, p.ws, day);
-      for (const m of meds) {
-        for (const slot of m.times) {
+      const has = (kind: string) => alerts.some((a) => a.ws === p.ws && a.day === day && a.kind === kind);
+      const checkedIn = checkins.some((c) => c.ws === p.ws && c.day === day && c.completed_at);
+      if (time > p.checkin_by && !checkedIn && !has("no_checkin")) alert(p.ws, day, "warn", "no_checkin", `No good-morning check-in from ${p.parent_name} yet (expected by ${db.spokenTime(p.checkin_by)}).`);
+      for (const m of meds.filter((x) => x.ws === p.ws)) {
+        for (const slot of m.times as string[]) {
           const [h, mm] = slot.split(":").map(Number);
-          const late = `${String(Math.min(23, h + 2)).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
-          if (time >= late && h + 2 <= 23 && !doses.some((d) => d.med_id === m.id && d.slot === slot)) {
-            await env.DB.prepare("INSERT OR IGNORE INTO doses (ws, med_id, day, slot, status, at) VALUES (?, ?, ?, ?, 'missed', ?)")
-              .bind(p.ws, m.id, day, slot, db.nowIso())
-              .run();
-            await db.addAlert(
-              env,
-              p.ws,
-              day,
-              "warn",
-              "missed_dose",
-              `${p.parent_name} hasn't confirmed the ${db.spokenTime(slot)} ${m.nickname || m.name}.`,
-            );
+          if (h + 2 > 23) continue;
+          const late = `${String(h + 2).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+          if (time >= late && !doses.some((d) => d.ws === p.ws && d.med_id === m.id && d.day === day && d.slot === slot)) {
+            writes.push(env.DB.prepare("INSERT OR IGNORE INTO doses (ws, med_id, day, slot, status, at) VALUES (?, ?, ?, ?, 'missed', ?)").bind(p.ws, m.id, day, slot, now));
+            alert(p.ws, day, "warn", "missed_dose", `${p.parent_name} hasn't confirmed the ${db.spokenTime(slot)} ${m.nickname || m.name}.`);
           }
         }
       }
-
       if (time >= "18:00") {
-        const { results: tomorrow } = await env.DB.prepare(
-          "SELECT * FROM appointments WHERE ws = ? AND reminded = 0 AND starts_at >= ? AND starts_at < ?",
-        )
-          .bind(p.ws, db.addDays(day, 1), db.addDays(day, 2))
-          .all<any>();
-        for (const a of tomorrow) {
-          await db.addAlert(
-            env,
-            p.ws,
-            day,
-            "info",
-            "appointment",
-            `Tomorrow at ${db.spokenTime(a.starts_at.slice(11, 16))}: ${a.title}${a.place ? ` (${a.place})` : ""}.`,
-          );
-          await env.DB.prepare("UPDATE appointments SET reminded = 1 WHERE id = ?").bind(a.id).run();
+        const tomorrow = db.addDays(day, 1);
+        for (const a of appts.filter((x) => x.ws === p.ws && x.starts_at.slice(0, 10) === tomorrow)) {
+          alert(p.ws, day, "info", "appointment", `Tomorrow at ${db.spokenTime(a.starts_at.slice(11, 16))}: ${a.title}${a.place ? ` (${a.place})` : ""}.`);
+          writes.push(env.DB.prepare("UPDATE appointments SET reminded = 1 WHERE id = ?").bind(a.id));
         }
       }
+      if (time >= "06:00" && time < "12:00" && p.lat != null && p.lon != null && !has("weather")) needWeather.push({ p, day });
+    }
 
-      if (time >= "06:00" && time < "12:00" && p.lat != null && !already("weather")) {
-        const w = await weatherAdvice(p.lat, p.lon!).catch(() => null);
-        if (w && w.level !== "none" && w.level !== "caution") await db.addAlert(env, p.ws, day, "info", "weather", w.spoken);
+    if (needWeather.length) {
+      try {
+        const advice = await weatherAdviceMany(needWeather.slice(0, 100).map(({ p }) => ({ lat: p.lat!, lon: p.lon! })));
+        advice.forEach((w, i) => {
+          if (w.level !== "none" && w.level !== "caution") alert(needWeather[i].p.ws, needWeather[i].day, "info", "weather", w.spoken);
+        });
+      } catch (e) {
+        console.error("weather", (e as Error).message);
       }
     }
+    for (let i = 0; i < writes.length; i += 80) await env.DB.batch(writes.slice(i, i + 80));
+    console.log(`checked ${homes.length} households, ${writes.length} writes`);
   },
 };

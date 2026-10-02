@@ -143,7 +143,7 @@ export function buildServer(env: Env, wsRaw: string): McpServer {
       }),
     },
     async ({ parent_name, city, checkin_by, family }) => {
-      const place = await geocode(city.split(",")[0]);
+      const place = await geocode(city);
       if (!place) return fail(`I couldn't find ${city}. Try the nearest larger city.`);
       const old = await db.getProfile(env, ws);
       await db.saveProfile(env, {
