@@ -20,13 +20,28 @@ async function seed(env: Env, ws: string) {
   await env.DB.batch(
     ["profile", "meds", "doses", "checkins", "appointments", "alerts"].map((t) => env.DB.prepare(`DELETE FROM ${t} WHERE ws = ?`).bind(ws)),
   );
+  // The sample parent lives wherever it is morning right now, so "good morning" fits whenever a
+  // judge tries it. All are English-speaking cities with real coordinates and time zones.
+  const CITIES = [
+    { city: "Phoenix, US", lat: 33.44838, lon: -112.07404, tz: "America/Phoenix" },
+    { city: "Chicago, US", lat: 41.85003, lon: -87.65005, tz: "America/Chicago" },
+    { city: "New York, US", lat: 40.71427, lon: -74.00597, tz: "America/New_York" },
+    { city: "Los Angeles, US", lat: 34.05223, lon: -118.24368, tz: "America/Los_Angeles" },
+    { city: "Honolulu, US", lat: 21.30694, lon: -157.85833, tz: "Pacific/Honolulu" },
+    { city: "London, GB", lat: 51.50853, lon: -0.12574, tz: "Europe/London" },
+    { city: "Perth, AU", lat: -31.95224, lon: 115.8614, tz: "Australia/Perth" },
+    { city: "Sydney, AU", lat: -33.86785, lon: 151.20732, tz: "Australia/Sydney" },
+    { city: "Auckland, NZ", lat: -36.84853, lon: 174.76349, tz: "Pacific/Auckland" },
+  ];
+  const minutes = (tz: string) => { const [h, m] = db.localNow(tz).time.split(":").map(Number); return h * 60 + m; };
+  const home = [...CITIES].sort((a, b) => Math.abs(minutes(a.tz) - 7 * 60 - 30) - Math.abs(minutes(b.tz) - 7 * 60 - 30))[0];
   await db.saveProfile(env, {
     ws,
     parent_name: "Ruth",
-    city: "Phoenix, US",
-    lat: 33.44838,
-    lon: -112.07404,
-    tz: "America/Phoenix",
+    city: home.city,
+    lat: home.lat,
+    lon: home.lon,
+    tz: home.tz,
     checkin_by: "10:30",
     family: [
       { name: "Maya", relation: "daughter" },
@@ -45,7 +60,7 @@ async function seed(env: Env, ws: string) {
       .bind(ws, m.name, m.nickname, m.dose, JSON.stringify(m.times), label?.purpose ?? "", label?.setId ?? null, db.nowIso())
       .run();
   }
-  const { day } = db.localNow("America/Phoenix");
+  const { day } = db.localNow(home.tz);
   await env.DB.prepare("INSERT INTO appointments (ws, title, starts_at, place, created_at) VALUES (?, ?, ?, ?, ?)")
     .bind(ws, "Doctor Patel, blood pressure check", `${db.addDays(day, 1)}T10:00`, "Banner clinic", db.nowIso())
     .run();

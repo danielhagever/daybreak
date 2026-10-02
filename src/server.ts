@@ -330,7 +330,7 @@ export function buildServer(env: Env, wsRaw: string): McpServer {
       const left = data.schedule.filter((s) => s.status === "due");
       return reply(
         status === "taken"
-          ? `Got it, ${m.nickname || m.name} for ${db.spokenTime(pick)} is taken.${left.length ? ` Still due: ${left.map((s) => s.nickname || s.name).join(", ")}.` : ""}`
+          ? `Got it, ${m.nickname || m.name} for ${db.spokenTime(pick)} is taken.${left.length ? ` Still due: ${left.map((s) => `${s.nickname || s.name} (${db.spokenTime(s.slot)})`).join(", ")}.` : ""}`
           : `Okay, I noted that you skipped ${m.nickname || m.name}. If you're not sure about skipping, check with your doctor.`,
         { schedule: data.schedule, parent: p.parent_name },
       );
@@ -457,7 +457,7 @@ export function buildServer(env: Env, wsRaw: string): McpServer {
       const ap = appts.filter((a: any) => a.starts_at.slice(0, 10) <= db.addDays(day, 1)).map((a: any) => apptSpoken(a, day));
       const parts = [
         due.length
-          ? `Due now: ${due.map((s) => s.nickname || s.name).join(", ")}.`
+          ? `Due now: ${due.map((s) => `${s.nickname || s.name} (${db.spokenTime(s.slot)})`).join(", ")}.`
           : schedule.length
             ? "You're up to date on medicines."
             : "",
