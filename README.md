@@ -4,6 +4,7 @@
 
 Millions of older adults live alone, and their adult children solve it with a daily phone call that both sides dread missing. Daybreak turns that call into a two-minute conversation with Alexa+: how did you sleep, how are you feeling, anything hurting, here are your medicines and appointments, and it's going to be 103 degrees so stay in this afternoon. The family sees the result without calling, and a quiet background check raises a flag when the good morning doesn't come.
 
+- **Demo video (2.5 min):** https://youtu.be/1ohFs-dISFw
 - **Live demo (simulated Echo Show, voice in and out):** https://daybreak.meshulam791.workers.dev (press "Load the sample household")
 - **Family view:** https://daybreak.meshulam791.workers.dev/family.html
 - **MCP endpoint (Streamable HTTP):** `https://daybreak.meshulam791.workers.dev/mcp?ws=<household>`
